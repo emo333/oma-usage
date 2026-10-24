@@ -1,0 +1,36 @@
+# Prevent the agent from viewing system paths and credentials
+.git/
+.env
+.env.*
+*key*
+*secret*
+*token*
+credentials.json
+.ssh/
+.aws/
+.kube/
+
+# Prevent the agent from choking on massive dependency files
+node_modules/
+vendor/
+.next/
+.nuxt/
+dist/
+build/
+out/
+target/
+*.exe
+*.dll
+*.so
+*.war
+*.ear
+*.zip
+*.tar.gz
+*.rar
+
+# Logs and system artifacts
+*.log
+.npm/
+.yarn/
+Thumbs.db
+Desktop.ini
