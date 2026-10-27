@@ -1,0 +1,11 @@
+# Managed by oma-usage (org.omarchy.OmaUsage)
+[Desktop Entry]
+Type=Application
+Name=Oma Usage
+Comment=Local software usage insights
+Exec=@LAUNCHER@
+Icon=utilities-system-monitor
+Terminal=false
+Categories=System;Monitor;
+StartupNotify=true
+DBusActivatable=false

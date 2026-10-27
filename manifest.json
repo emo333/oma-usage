@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "id": "oma.usage",
+  "name": "Oma Usage",
+  "version": "0.1.0",
+  "kinds": ["service", "bar-widget"],
+  "entryPoints": {"service": "Service.qml", "barWidget": "BarWidget.qml"},
+  "barWidget": {"displayName": "Usage", "category": "Info", "defaultSection": "right", "allowMultiple": false}
+}

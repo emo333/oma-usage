@@ -1,0 +1,15 @@
+# Managed by oma-usage (org.omarchy.OmaUsage)
+[Unit]
+Description=Oma Usage local metadata collector
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=:/usr/bin/env -- @LAUNCHER@ daemon
+UMask=0077
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=graphical-session.target

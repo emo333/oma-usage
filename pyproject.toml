@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "oma-usage"
+version = "0.1.0"
+description = "Local evidence-based software usage insights for Omarchy"
+requires-python = ">=3.12"
+license = "MIT"
+dependencies = ["tree-sitter==0.26.0", "tree-sitter-bash==0.25.1"]
+
+[project.scripts]
+oma-usage = "oma_usage.cli:main"
+
+[tool.setuptools.package-data]
+oma_usage = ["data/*.json"]
+
+[tool.setuptools.packages.find]
+include = ["oma_usage*"]
