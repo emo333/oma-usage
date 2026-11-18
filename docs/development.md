@@ -59,6 +59,7 @@ Use a disposable installation fixture, synthetic history, and a separate install
 | Scenario | Required observable result |
 | --- | --- |
 | Native add/enable | Omarchy validates the root manifest and discovers/enables the mixed service/widget plugin. No custom installer is invoked by cloning. |
+| Plugin scan readiness | An explicit transient `not ready` response can complete setup once discovery finishes. An unfinished scan has a bounded wait; permanent errors and ambiguous IPC failures are not replayed. Failures leave collection paused. |
 | Fresh widget activation | Runtime consent opens despite no `~/.local/bin/oma-usage`. |
 | Decline runtime setup | No runtime, service, startup block, history read, or dependency download. |
 | Approve runtime setup | External venv and owned integration files appear; the installed dashboard opens; tracking stays off. Source checkout remains unchanged. |

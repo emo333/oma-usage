@@ -39,6 +39,8 @@ Click **Usage**. First use has two separate approvals:
 
 Canceling either approval does not authorize the next stage. Existing shells load the Bash hook only after opening a new shell or explicitly sourcing the installed hook. Failed tracking stages remain visible and can be retried.
 
+Setup briefly waits for an asynchronous Omarchy plugin scan to finish. If plugin readiness times out or its IPC call fails, the failed stage stays visible and collection stays paused. Retry from Settings after the shell is ready.
+
 Omarchy owns the installed Git checkout at `~/.config/omarchy/plugins/oma.usage`. The development repository is source only. The runtime is an installed copy in a separate virtual environment, not an editable import of either checkout. Backend setup never overwrites the plugin checkout, replaces `shell.json`, modifies `/usr/share/omarchy`, or installs native packages.
 
 ### Update

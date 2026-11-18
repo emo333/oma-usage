@@ -315,10 +315,17 @@ def enable_tracking(history_file=None) -> dict:
         _save(state)
         stage = 'plugin'
         run_command(['omarchy-shell', 'shell', 'rescanPlugins'])
-        reply = run_command(['omarchy-shell', 'shell', 'putBarWidget', 'oma.usage',
-                             '{"section":"right"}'])
-        if reply != 'ok':
-            raise SetupError('plugin_enable_failed')
+        deadline = time.monotonic() + 5
+        while True:
+            reply = run_command(['omarchy-shell', 'shell', 'putBarWidget', 'oma.usage',
+                                 '{"section":"right"}'])
+            if reply == 'ok':
+                break
+            # An asynchronous scan's explicit "not ready" reply changes nothing.
+            # Other failures, including ambiguous IPC timeouts, must not be replayed.
+            if reply != 'not ready' or time.monotonic() >= deadline:
+                raise SetupError('plugin_enable_failed')
+            time.sleep(0.2)
         state['stages']['plugin'] = 'enabled'
         _save(state)
         stage = 'collectors'
