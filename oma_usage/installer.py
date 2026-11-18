@@ -57,19 +57,23 @@ def preflight() -> None:
         gi.require_version('Gtk', '4.0')
         gi.require_version('Adw', '1')
         gi.require_version('GioUnix', '2.0')
-        from gi.repository import Gtk, Adw, GioUnix  # noqa: F401
+        # GI namespaces are generated from native typelibs, not Python source.
+        from gi.repository import Gtk, Adw, GioUnix  # pyright: ignore[reportMissingModuleSource]  # noqa: F401
     except (ImportError, ValueError):
         raise InstallError('Native dependencies missing. Run: ' + NATIVE_PREREQUISITE) from None
-    for binary in ('pacman', 'systemctl', 'omarchy', 'omarchy-shell', 'omarchy-plugin-enable'):
+    for binary in ('pacman', 'systemctl', 'omarchy', 'omarchy-shell'):
         if not shutil.which(binary):
             raise InstallError('Required command missing: ' + binary)
+    enable_command = shutil.which('omarchy-plugin-enable')
+    if enable_command is None:
+        raise InstallError('Required command missing: omarchy-plugin-enable')
     run_command(['pacman', '-Q'], timeout=15)
     run_command(['systemctl', '--user', 'show-environment'])
     # Query only. These invoke neither enablement nor a shell configuration write.
     help_text = run_command(['omarchy', 'plugin', 'enable', '--help'])
     if 'plugin enable' not in help_text:
         raise InstallError('incompatible_omarchy_plugin_contract')
-    enable = Path(shutil.which('omarchy-plugin-enable')).read_text()
+    enable = Path(enable_command).read_text()
     if '--section)' not in enable or 'enablePlugin' not in enable:
         raise InstallError('incompatible_omarchy_plugin_contract')
     root = Path(os.environ.get('OMARCHY_PATH', '/usr/share/omarchy'))
@@ -290,7 +294,8 @@ def _active_owned_collector(manifest: dict) -> bool:
 
 
 def _require_closed_dashboard() -> None:
-    from gi.repository import Gio, GLib
+    # GI namespaces are generated from native typelibs, not Python source.
+    from gi.repository import Gio, GLib  # pyright: ignore[reportMissingModuleSource]
     try:
         bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
         reply = bus.call_sync('org.freedesktop.DBus', '/org/freedesktop/DBus',

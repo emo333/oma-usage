@@ -100,7 +100,8 @@ class Peer:
 class Daemon:
     def __init__(self):
         # Import only GLib: no GTK or display initialization in collectors.
-        from gi.repository import GLib
+        # GI namespaces are generated from native typelibs, not Python source.
+        from gi.repository import GLib  # pyright: ignore[reportMissingModuleSource]
         self.GLib = GLib
         self.config = load_config()
         self.path = socket_path()
@@ -177,8 +178,10 @@ class Daemon:
             self.path.chmod(0o600)
             self.socket_identity = self.path.stat().st_ino
             self.listener.listen(16)
+            channel = self.GLib.IOChannel.unix_new(self.listener.fileno())
+            channel.set_close_on_unref(False)
             self.watches.append(self.GLib.io_add_watch(
-                self.listener.fileno(), self.GLib.IO_IN, self._accept))
+                channel, self.GLib.PRIORITY_DEFAULT, self.GLib.IOCondition.IN, self._accept))
             from . import inventory
             from .services import ServiceMonitor
             self.inventory = inventory
@@ -202,9 +205,12 @@ class Daemon:
         return 0
 
     def _accept(self, _fd, _condition):
+        listener = self.listener
+        if listener is None or self.closed:
+            return False
         for _ in range(16):
             try:
-                conn, _ = self.listener.accept()
+                conn, _ = listener.accept()
             except BlockingIOError:
                 break
             conn.setblocking(False)
@@ -214,8 +220,11 @@ class Daemon:
                 continue
             peer = Peer(conn)
             self.peers.add(peer)
+            channel = self.GLib.IOChannel.unix_new(conn.fileno())
+            channel.set_close_on_unref(False)
             peer.read_watch = self.GLib.io_add_watch(
-                conn.fileno(), self.GLib.IO_IN | self.GLib.IO_HUP | self.GLib.IO_ERR, self._read, peer)
+                channel, self.GLib.PRIORITY_DEFAULT,
+                self.GLib.IOCondition.IN | self.GLib.IOCondition.HUP | self.GLib.IOCondition.ERR, self._read, peer)
         return True
 
     def _send(self, peer, message):
@@ -227,12 +236,15 @@ class Daemon:
             return
         peer.outgoing.extend(encoded)
         if not peer.write_watch:
+            channel = self.GLib.IOChannel.unix_new(peer.sock.fileno())
+            channel.set_close_on_unref(False)
             peer.write_watch = self.GLib.io_add_watch(
-                peer.sock.fileno(), self.GLib.IO_OUT | self.GLib.IO_ERR | self.GLib.IO_HUP,
+                channel, self.GLib.PRIORITY_DEFAULT,
+                self.GLib.IOCondition.OUT | self.GLib.IOCondition.ERR | self.GLib.IOCondition.HUP,
                 self._write, peer)
 
     def _write(self, _fd, condition, peer):
-        if condition & (self.GLib.IO_ERR | self.GLib.IO_HUP):
+        if condition & (self.GLib.IOCondition.ERR | self.GLib.IOCondition.HUP):
             self._drop(peer)
             return False
         try:
@@ -298,7 +310,7 @@ class Daemon:
         except OSError:
             self._drop(peer)
             return False
-        if condition & (self.GLib.IO_HUP | self.GLib.IO_ERR):
+        if condition & (self.GLib.IOCondition.HUP | self.GLib.IOCondition.ERR):
             self._drop(peer)
             return False
         return True
@@ -540,10 +552,13 @@ class Daemon:
             if self.pending_inventory is not None:
                 snapshot, error = self.pending_inventory
                 self.pending_inventory = None
+                inventory = self.inventory
+                if inventory is None:
+                    raise RuntimeError('Inventory result without an inventory provider')
                 if not error:
-                    self.inventory.apply_inventory(self.store, snapshot, now)
+                    inventory.apply_inventory(self.store, snapshot, now)
                     if snapshot['apps'] is not None:
-                        self.focus.resolve = lambda app_id, snapshot=snapshot: self.inventory.resolve_app(self.store, snapshot, app_id)
+                        self.focus.resolve = lambda name, snapshot=snapshot: inventory.resolve_app(self.store, snapshot, name)
                     self.store.metadata('inventory_error', '')
                 else:
                     self.store.metadata('inventory_error', error)

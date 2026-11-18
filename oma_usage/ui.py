@@ -5,6 +5,7 @@ closes its own read-only connection. GTK objects never cross that boundary.
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 import json
@@ -14,7 +15,8 @@ import gi
 
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
-from gi.repository import Adw, Gio, GLib, GObject, Gtk
+# GI namespaces are generated from native typelibs, not Python source.
+from gi.repository import Adw, Gio, GLib, GObject, Gtk  # pyright: ignore[reportMissingModuleSource]
 
 from . import client, insights, inventory, recommendations, store
 
@@ -143,7 +145,7 @@ class EvidenceTable(Gtk.Box):
             factory.connect('setup', self._setup_cell)
             factory.connect('bind', self._bind_cell, key, formatter)
             column = Gtk.ColumnViewColumn(title=title, factory=factory, resizable=True)
-            sorter = Gtk.CustomSorter.new(lambda a, b, *_args, k=key: self._compare(a.data.get(k), b.data.get(k)))
+            sorter = Gtk.CustomSorter.new(lambda a, b, *_args, k=key: self._compare_records(a, b, k))
             column.set_sorter(sorter)
             self.view.append_column(column)
         self.sorted.set_sorter(self.view.get_sorter())
@@ -151,6 +153,12 @@ class EvidenceTable(Gtk.Box):
         scroller.set_child(self.view)
         self.append(scroller)
         self.append(button('Open selected details', self.open_selected))
+
+    @staticmethod
+    def _compare_records(a, b, key):
+        # This sorter is attached only to the Record-backed list store.
+        assert isinstance(a, Record) and isinstance(b, Record)
+        return EvidenceTable._compare(a.data.get(key), b.data.get(key))
 
     @staticmethod
     def _compare(a, b):
@@ -170,12 +178,14 @@ class EvidenceTable(Gtk.Box):
 
     def _activate(self, _view, position):
         item = self.sorted.get_item(position)
-        if item:
+        if item is not None:
+            assert isinstance(item, Record)
             self.on_activate(item.data)
 
     def open_selected(self):
         item = self.selection.get_selected_item()
-        if item:
+        if item is not None:
+            assert isinstance(item, Record)
             self.on_activate(item.data)
 
     def set_rows(self, rows, *, metric_key=None):
@@ -292,8 +302,9 @@ class UsageWindow(Adw.ApplicationWindow):
         page.append(label(insights.DEFINITIONS[kind]))
         count_title = 'Dated submitted mentions' if kind == 'command' else 'Observed starts' if kind == 'service' else 'Focus sessions'
         time_title = 'Observed running time' if kind == 'service' else 'Focused time'
-        columns = [('Name', 'label', None), ('Identity', 'key', None), ('Evidence', 'usage_state', None),
-                   (count_title, 'count', None)]
+        columns: list[tuple[str, str, Callable[..., str] | None]] = [
+            ('Name', 'label', None), ('Identity', 'key', None), ('Evidence', 'usage_state', None),
+            (count_title, 'count', None)]
         if kind != 'command':
             columns.append((time_title, 'seconds', duration))
         columns += [('Undated imported mentions', 'undated_count', None), ('Installed', 'installed', None)]
@@ -426,7 +437,7 @@ class UsageWindow(Adw.ApplicationWindow):
             for name in ('apps', 'commands', 'services'):
                 section = self.report[name]
                 self.tables[name].set_rows(section['rows'], metric_key=section['metric'])
-            self._render_overview()
+            self._render_overview(self.report)
             self._render_review()
             self._render_alternatives()
         settings = value.get('settings')
@@ -463,10 +474,9 @@ class UsageWindow(Adw.ApplicationWindow):
             table.set_rows([])
         self._render_alternatives()
 
-    def _render_overview(self):
+    def _render_overview(self, report):
         target = self.overview_content
         self.clear_box(target)
-        report = self.report
         target.append(label(f"Period: {report['period']['start_at']} — {report['period']['end_at']} (UTC)"))
         for key, title in [('apps', 'Leading applications · focused time'), ('commands', 'Leading commands · dated submitted mentions'), ('services', 'Service activity · observed running time')]:
             target.append(label(title, heading=True))
@@ -494,7 +504,10 @@ class UsageWindow(Adw.ApplicationWindow):
     def _render_alternatives(self):
         key = 'observed_comparisons' if self.alternative_mode.get_selected() == 0 else 'all_comparisons'
         rows = self.snapshot.get(key, [])
-        selected = self.use_case.get_selected_item().get_string()
+        selected_item = self.use_case.get_selected_item()
+        # The fixed string model always contains at least "All use cases".
+        assert isinstance(selected_item, Gtk.StringObject)
+        selected = selected_item.get_string()
         rows = [{**r, 'source_name': r['source']['package'], 'target_name': r['target']['package']} for r in rows if selected == 'All use cases' or r['use_case'] == selected]
         self.tables['alternatives'].set_rows(rows)
 
@@ -521,6 +534,9 @@ class UsageWindow(Adw.ApplicationWindow):
         self.dialog('Source coverage · ' + source['source'], content)
 
     def show_entity(self, entity):
+        # Entity rows are populated only from a report and cleared when it is unavailable.
+        report = self.report
+        assert report is not None
         content = box()
         content.append(label(entity.get('definition') or 'Package-level evidence, not a lifetime usage total. Dependency and service relationships are warnings, never permission to delete.'))
         names = {
@@ -546,7 +562,7 @@ class UsageWindow(Adw.ApplicationWindow):
             content.append(label('Few recorded uses — retained mentions or focus sessions, not lifetime counts.'))
         if entity.get('entry_points') is not None:
             content.append(label('Tracked entry points: ' + ', '.join(e['key'] for e in entity['entry_points'])))
-        package = entity if entity['kind'] == 'package' else next((p for p in self.report['package_review']['inventory'] if p['id'] == entity.get('owner_package_id')), None)
+        package = entity if entity['kind'] == 'package' else next((p for p in report['package_review']['inventory'] if p['id'] == entity.get('owner_package_id')), None)
         if package:
             current = label('Reading current package dependency relationships…')
             content.append(current)
@@ -562,7 +578,6 @@ class UsageWindow(Adw.ApplicationWindow):
         comparison_content = box()
         comparison_content.append(label('Reading curated comparisons…'))
         content.append(comparison_content)
-        report = self.report
         def comparisons_ready(comparisons, error):
             self.clear_box(comparison_content)
             if error:
@@ -723,6 +738,7 @@ class UsageWindow(Adw.ApplicationWindow):
         def close(*_):
             self.removing_backend = False
             application = self.get_application()
+            assert application is not None
             self.close()
             application.quit()
         dialog.connect('response', close)

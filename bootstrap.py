@@ -23,7 +23,8 @@ def main() -> int:
         import gi
         gi.require_version('Gtk', '4.0')
         gi.require_version('Adw', '1')
-        from gi.repository import Adw, GLib, Gtk
+        # GI namespaces are generated from native typelibs, not Python source.
+        from gi.repository import Adw, GLib, Gtk  # pyright: ignore[reportMissingModuleSource]
     except (ImportError, ValueError, OSError, installer.InstallError) as exc:
         message = ('Cannot open Oma Usage setup: ' + str(exc) + '\nNative prerequisites: '
                    + installer.NATIVE_PREREQUISITE)

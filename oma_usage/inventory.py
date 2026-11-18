@@ -80,8 +80,11 @@ def _owned_files():
     timer = threading.Timer(60,proc.kill)
     timer.daemon = True
     timer.start()
+    stdout = proc.stdout
     try:
-        for line in proc.stdout:
+        if stdout is None:
+            raise RuntimeError('ownership_unavailable')
+        for line in stdout:
             package, separator, path = line.rstrip('\n').partition(' ')
             if separator and not path.endswith('/'):
                 owners[path] = package
@@ -89,7 +92,8 @@ def _owned_files():
             raise RuntimeError('ownership_unavailable')
     finally:
         timer.cancel()
-        proc.stdout.close()
+        if stdout is not None:
+            stdout.close()
         if proc.poll() is None:
             proc.kill()
             proc.wait()
@@ -125,7 +129,8 @@ def _commands(owners):
 def _apps(owners):
     import gi
     gi.require_version('GioUnix','2.0')
-    from gi.repository import Gio, GioUnix
+    # GI namespaces are generated from native typelibs, not Python source.
+    from gi.repository import Gio, GioUnix  # pyright: ignore[reportMissingModuleSource]
     result = []
     for info in Gio.AppInfo.get_all():
         if not isinstance(info,GioUnix.DesktopAppInfo) or not info.should_show():
@@ -146,7 +151,8 @@ def _apps(owners):
 
 
 def service_inventory(scope, owners):
-    from gi.repository import Gio, GLib
+    # GI namespaces are generated from native typelibs, not Python source.
+    from gi.repository import Gio, GLib  # pyright: ignore[reportMissingModuleSource]
     bus = Gio.bus_get_sync(Gio.BusType.SESSION if scope == 'user' else Gio.BusType.SYSTEM,None)
     def call(method, params, result_type):
         return bus.call_sync('org.freedesktop.systemd1','/org/freedesktop/systemd1','org.freedesktop.systemd1.Manager',method,params,GLib.VariantType.new(result_type),Gio.DBusCallFlags.NONE,5000,None).unpack()[0]

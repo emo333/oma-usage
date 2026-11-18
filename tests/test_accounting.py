@@ -110,8 +110,7 @@ class AccountingTests(unittest.TestCase):
         package['version'] = '2'
         apply_inventory(self.store,snapshot,self.now+timedelta(days=1))
         self.assertEqual(self.store.conn.execute("SELECT present_since FROM entities WHERE kind='package'").fetchone()[0],self.now.isoformat())
-        snapshot['packages'] = None
-        apply_inventory(self.store,snapshot,self.now+timedelta(days=2))
+        apply_inventory(self.store,{**snapshot, 'packages': None},self.now+timedelta(days=2))
         self.assertEqual(self.store.conn.execute("SELECT installed FROM entities WHERE kind='package'").fetchone()[0],1)
         snapshot['packages'] = {}
         apply_inventory(self.store,snapshot,self.now+timedelta(days=3))

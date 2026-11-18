@@ -31,11 +31,16 @@ A development venv is for local code and regression checks only:
 
 ```sh
 python3 -m venv --system-site-packages .venv
-.venv/bin/python -m pip install -e .
+.venv/bin/python -m pip install -e '.[dev]'
 .venv/bin/python -m unittest discover -s tests -v
+.venv/bin/python -m pyright --pythonpath .venv/bin/python
 ```
 
 GTK/Gio dependencies come from native system packages. Python parser versions are pinned in `pyproject.toml`. Do not commit the venv, build products, egg metadata, local databases, or credentials. Native plugin validation rejects symlinks inside a release checkout, excluding Git's own metadata; an ignored development venv must not be included in the distribution fixture.
+
+The `dev` extra pins Pyright and the upstream PyGObject stubs (GTK4 and libadwaita); neither is a runtime dependency. Pass `--pythonpath` so Pyright reads the interpreter's real search paths, including native GI packages inherited through `--system-site-packages`. Directory-only `venvPath`/`venv` configuration misses those system packages. Editors should select the same `.venv/bin/python` interpreter. Keep standard checking enabled; missing imports and nullable values are not suppressed.
+
+GI repository namespaces are generated from native typelibs, so they have no Python source modules. The import-line `reportMissingModuleSource` exemptions cover only that fact; upstream stubs still check all GI calls and values. Unnecessary exemptions are errors. Native namespace availability must also pass setup preflight and the GUI/collector smoke checks.
 
 The following commands are developer/collector interfaces, not substitutes for installing the plugin:
 

@@ -102,7 +102,7 @@ class _BusMonitor:
             self.connecting = False
             self.connection = connection
             self.closed_handler = connection.connect('closed', self._disconnected)
-            self._subscribe_signals()
+            self._subscribe_signals(connection)
             self._call(MANAGER_PATH, MANAGER, 'Subscribe', None, '()', self._subscribed)
 
         Gio.bus_get(self.bus_type, self.cancellable, connected)
@@ -134,9 +134,8 @@ class _BusMonitor:
                              GLib.VariantType.new(reply_type), Gio.DBusCallFlags.NONE,
                              CALL_TIMEOUT_MS, self.cancellable, finished)
 
-    def _subscribe_signals(self):
+    def _subscribe_signals(self, connection):
         Gio = self.owner.Gio
-        connection = self.connection
         for interface, member, path, arg0, callback, sender in (
             (MANAGER, 'UnitNew', MANAGER_PATH, None, self._unit_new, DESTINATION),
             (MANAGER, 'UnitRemoved', MANAGER_PATH, None, self._unit_removed, DESTINATION),
@@ -390,7 +389,8 @@ class ServiceMonitor:
     SQLite. tick is also a no-op writer while enabled_callable returns false.
     """
     def __init__(self, store, enabled_callable):
-        from gi.repository import Gio, GLib
+        # GI namespaces are generated from native typelibs, not Python source.
+        from gi.repository import Gio, GLib  # pyright: ignore[reportMissingModuleSource]
         self.Gio, self.GLib = Gio, GLib
         self.store = store
         self.enabled = enabled_callable
