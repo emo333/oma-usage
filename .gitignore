@@ -40,3 +40,45 @@ yarn-error.log*
 __pycache__/
 *.py[cod]
 *.egg-info/
+
+# Private usage databases, backups, and SQLite sidecars
+*.db
+*.db-*
+*.db.*
+*.sqlite
+*.sqlite-*
+*.sqlite.*
+*.sqlite3
+*.sqlite3-*
+*.sqlite3.*
+
+# Shell and REPL history dumps
+.bash_history*
+.zsh_history*
+.sh_history*
+.python_history*
+fish_history
+fish_history.*
+*.history
+
+# Private keys, backups, and key stores
+*.key
+*.key.*
+*.pem
+*.pem.*
+*.p12
+*.pfx
+*.jks
+*.keystore
+id_rsa
+id_rsa.*
+id_dsa
+id_dsa.*
+id_ecdsa
+id_ecdsa.*
+id_ecdsa_sk
+id_ecdsa_sk.*
+id_ed25519
+id_ed25519.*
+id_ed25519_sk
+id_ed25519_sk.*
