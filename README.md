@@ -2,6 +2,14 @@
 
 A local GTK4/libadwaita dashboard and Omarchy bar plugin for software usage evidence. No web server, privileged collector, automatic software removal, or online backend.
 
+## Omarchy baseline
+
+This plugin is based on [Omarchy 4.5.0](https://omarchy.org/news/2026/11/omarchy-4-5/). The reviewed and tested platform is the installed **`omarchy 4.5.0-3`**, with **`quickshell 0.3.2.r7.g2b4501a-1`**, on x86_64. Older or newer Omarchy releases are not automatically assumed compatible.
+
+The compatibility review covers the Git plugin manager, third-party widget facade, mixed service/widget manifest, native shell IPC, and lock-state query. Tracking setup preserves existing placement in all six current bar sections: `left`, `centerBegin`, `center`, `centerEnd`, `right`, and `tray`. It uses Wayland toplevel/idle APIs, not workspace-layout-specific Hyprland configuration.
+
+The dashboard and widget text are currently English. Omarchy's new language selection does not translate them. ARM installation has not been verified.
+
 ## Install through Omarchy
 
 Requires Python 3.12+, pacman, systemd user services, and an Omarchy shell with Git-managed plugins and mixed `service`/`bar-widget` support. Run as your normal desktop user, never root.
@@ -15,10 +23,10 @@ omarchy pkg add python-gobject gtk4 libadwaita
 Use Omarchy's normal plugin installation process:
 
 ```sh
-omarchy plugin add
+omarchy plugin add https://github.com/emo333/oma-usage.git
 ```
 
-Paste the published oma-usage repository's GitHub clone URL when prompted. Review the unsandboxed-plugin warning, enable `oma.usage`, and choose its bar section. The suggested section is right. If you added it without enabling:
+Review the unsandboxed-plugin warning, enable `oma.usage`, and choose its bar section. The suggested section is right. If you added it without enabling:
 
 ```sh
 omarchy plugin enable oma.usage --section right

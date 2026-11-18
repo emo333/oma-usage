@@ -63,6 +63,9 @@ Use a disposable installation fixture, synthetic history, and a separate install
 | Decline runtime setup | No runtime, service, startup block, history read, or dependency download. |
 | Approve runtime setup | External venv and owned integration files appear; the installed dashboard opens; tracking stays off. Source checkout remains unchanged. |
 | Repeat activation | The existing setup/dashboard is reused rather than producing duplicate windows. |
+| Current bar sections | The installed release's native registry preserves the widget's existing section and per-widget settings when setup requests the default placement. An absent widget gets the default. |
+| Native collector socket | Installed-wheel GLib watches accept peers, read/write responses, handle disconnects, and shut down without closing another socket or leaking the owned endpoint. The real Quickshell observer receives settings while collection is off. |
+| Native table/report lifecycle | Sort and activate real Record-backed rows, change the use-case filter, retain the prior report after a worker failure, and clear stale rows when the database becomes unreadable. |
 | Tracking preview/cancel | Exact managed paths and history source are shown; cancel starts no collectors and changes no shell startup configuration. |
 | Approve tracking | Actual stage outcomes are reported, selected synthetic history imports once, source states are honest, and only the managed startup block is added. |
 | Native update | Changed backend payload prompts a runtime update; unchanged payload does not. Approved update preserves user settings and pause state. |
