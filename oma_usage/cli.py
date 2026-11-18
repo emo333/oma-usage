@@ -97,6 +97,9 @@ def _bash_event(argv) -> int:
                 raise ValueError('invalid_arguments')
 
         parser = QuietParser(add_help=False)
+        # An already-open shell can still have a pre-update hook in memory.
+        # Reject that invocation before reading a private history record.
+        parser.add_argument('--tracked', action='store_true', required=True)
         parser.add_argument('--session', required=True)
         parser.add_argument('--sequence', required=True, type=int)
         parser.add_argument('--check', action='store_true')
@@ -126,6 +129,27 @@ def _bash_event(argv) -> int:
     return 0
 
 
+def _tracked_shell() -> int:
+    import os
+    import sys
+    from . import installer
+
+    target = installer.locations()
+    try:
+        manifest = installer.read_manifest()
+        for key in ('hook', 'terminal'):
+            path = target[key]
+            installer.assert_owned(path, manifest)
+            if not path.is_file():
+                raise installer.InstallError('Update the local backend to restore the tracked terminal files.')
+        # The terminal launches Oma Usage, not Bash directly. This prevents
+        # emulator shell integration from replacing Bash's startup arguments.
+        os.execv('/usr/bin/bash', ['/usr/bin/bash', '--rcfile', str(target['terminal']), '-i'])
+    except (OSError, installer.InstallError) as exc:
+        print('Tracked shell unavailable: ' + str(exc), file=sys.stderr)
+        return 1
+
+
 def main(argv=None) -> int:
     import sys
 
@@ -140,6 +164,7 @@ def main(argv=None) -> int:
     history = commands.add_parser('import-history', help='Import one Bash history snapshot')
     history.add_argument('--file', dest='path')
     commands.add_parser('bash-event', help='Internal bounded Bash prompt helper')
+    commands.add_parser('tracked-shell', help='Open an opt-in tracked interactive Bash session')
     uninstall = commands.add_parser('uninstall', help='Preview ownership-safe local backend cleanup')
     uninstall.add_argument('--yes', action='store_true', help='Approve backend cleanup; retain usage, settings, and native plugin')
     args = parser.parse_args(argv)
@@ -151,6 +176,8 @@ def main(argv=None) -> int:
         if not args.yes:
             print('Preview only; no changes made. Approve with: oma-usage uninstall --yes')
         return 0 if result.get('ok') else 1
+    if args.command == 'tracked-shell':
+        return _tracked_shell()
     if args.command == 'import-history':
         result = import_history(args.path)
         if result['ok']:

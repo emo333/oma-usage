@@ -55,7 +55,7 @@ def main() -> int:
             layout.append(self.status)
             scroll = Gtk.ScrolledWindow(vexpand=True)
             target = installer.locations()
-            paths = [target[key] for key in ('venv', 'manifest', 'launcher', 'desktop', 'unit', 'hook')]
+            paths = [target[key] for key in ('venv', 'manifest', *installer.ASSETS)]
             details = ('With your approval, install or refresh the local Python backend and its dependencies. '
                        'pip downloads build tools and Python dependencies from the configured package index. '
                        'A temporary build copy is used; the Omarchy plugin checkout is never changed.\n\n'
@@ -66,7 +66,7 @@ def main() -> int:
                        'its tracking and pause settings are preserved. Failed updates may leave it stopped. '
                        'A stopped collector is never started by this setup.\n\n'
                        'This does not enable tracking, read history, or change Bash startup. '
-                       'The dashboard requests separate consent for those actions. '
+                       'The dashboard requests separate tracking consent and never installs a hook into your startup files. '
                        'Cancel before approval creates no files and contacts no network service.')
             scroll.set_child(Gtk.Label(label=details, wrap=True, selectable=True, xalign=0, yalign=0))
             layout.append(scroll)

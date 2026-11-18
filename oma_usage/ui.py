@@ -300,6 +300,11 @@ class UsageWindow(Adw.ApplicationWindow):
     def _metrics_page(self, name, title, kind):
         page = self._page(name, title)
         page.append(label(insights.DEFINITIONS[kind]))
+        if kind == 'command':
+            page.append(label('Live command counts come only from tracked Bash terminals. '
+                              'The terminal loads your usual Bash configuration without editing it. '
+                              'With collection enabled, command names are counted when Bash returns to its prompt.'))
+            page.append(button('Open tracked terminal', self._open_tracked_terminal))
         count_title = 'Dated submitted mentions' if kind == 'command' else 'Observed starts' if kind == 'service' else 'Focus sessions'
         time_title = 'Observed running time' if kind == 'service' else 'Focused time'
         columns: list[tuple[str, str, Callable[..., str] | None]] = [
@@ -658,6 +663,39 @@ class UsageWindow(Adw.ApplicationWindow):
         except GLib.Error:
             self.operation_status.set_text('Browser launch failed. No result was fetched by Oma Usage.')
 
+    def _open_tracked_terminal(self):
+        from . import installer
+
+        if self.action_busy or self.removing_backend:
+            self.operation_status.set_text('Wait for the current operation before opening a tracked terminal.')
+            return
+        target = installer.locations()
+        try:
+            path = target['launcher']
+            installer.assert_owned(path, installer.read_manifest())
+            if not path.is_file():
+                raise installer.InstallError('Update the local backend to restore its launcher.')
+            home = str(Path.home())
+            launcher = Gio.SubprocessLauncher.new(Gio.SubprocessFlags.STDOUT_SILENCE | Gio.SubprocessFlags.STDERR_SILENCE)
+            launcher.set_cwd(home)
+            process = launcher.spawnv(['xdg-terminal-exec', '--dir=' + home, '--',
+                                       str(path), 'tracked-shell'])
+        except (OSError, installer.InstallError) as exc:
+            self.operation_status.set_text('Tracked terminal unavailable: ' + str(exc))
+            return
+        except GLib.Error:
+            self.operation_status.set_text('Could not start the tracked terminal. Check xdg-terminal-exec and your default terminal.')
+            return
+
+        def completed(source, result):
+            try:
+                source.wait_check_finish(result)
+            except GLib.Error:
+                if not self.closed:
+                    self.operation_status.set_text('Tracked terminal exited with an error. Check your default terminal and Bash configuration.')
+
+        process.wait_check_async(None, completed)
+
     def action(self, title, work, callback=None):
         if self.action_busy or self.removing_backend:
             self.operation_status.set_text('Another requested operation is still running; wait before retrying.')
@@ -685,7 +723,7 @@ class UsageWindow(Adw.ApplicationWindow):
                 self.operation_status.set_text('Backend removal blocked: ' + (error or value['error']))
                 return
             body = ('Remove these verified backend paths:\n' + '\n'.join(value['paths'])
-                    + '\n\nManaged Bash block: ' + text(value['bash_startup'])
+                    + '\n\nLegacy Bash block to remove, if present: ' + text(value['bash_startup'])
                     + '\n\n' + value['service']
                     + '\n\n' + '\n'.join(value['scopes'])
                     + '\n\nRetained:\n' + '\n'.join(value['retained'])
@@ -817,7 +855,7 @@ class UsageWindow(Adw.ApplicationWindow):
                 return
             self.preview = value
             self.setup_summary.set_text(self.preview_text(value))
-            dialog = Adw.AlertDialog(heading='Enable local tracking?', body=self.preview_text(value) + '\n\nThis action starts the user service paused, performs the one-time import (or reports its failure), adds the managed Bash source block, preserves existing widget placement or adds Usage to the right bar section if absent, then resumes collection. Open or source a new shell to load the hook. Only proceed if you consent to these exact local changes.')
+            dialog = Adw.AlertDialog(heading='Enable local tracking?', body=self.preview_text(value) + '\n\nThis action starts the user service paused, performs the one-time import (or reports its failure), preserves existing widget placement or adds Usage to the right bar section if absent, then resumes collection. No shell startup files are changed. For live Bash command counts, use Open tracked terminal on the Commands page. Only proceed if you consent to these exact local changes.')
             dialog.add_response('cancel', 'Cancel')
             dialog.add_response('enable', 'Enable local tracking')
             dialog.set_default_response('cancel')

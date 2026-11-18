@@ -22,6 +22,9 @@ class InstallError(Exception):
     pass
 
 
+ASSETS = ('launcher', 'desktop', 'unit', 'hook', 'terminal')
+
+
 def locations() -> dict[str, Path]:
     home = Path.home()
     data = Path(os.environ.get('XDG_DATA_HOME', home / '.local/share')).absolute() / 'oma-usage'
@@ -31,7 +34,7 @@ def locations() -> dict[str, Path]:
                 desktop=Path(os.environ.get('XDG_DATA_HOME', home / '.local/share')).absolute() / 'applications/org.omarchy.OmaUsage.desktop',
                 unit=config / 'systemd/user/oma-usage.service',
                 plugin=home / '.config/omarchy/plugins/oma.usage',
-                hook=data / 'oma-usage.bash')
+                hook=data / 'oma-usage.bash', terminal=data / 'terminal.bash')
 
 
 def run_command(args: list[str], *, timeout=15) -> str:
@@ -239,6 +242,7 @@ def _assets(project: Path) -> dict[Path, bytes]:
         target['unit']: (project / 'integrations/systemd/oma-usage.service.in').read_text().replace('@LAUNCHER@', _systemd_quote(launcher)).encode(),
         target['desktop']: (project / 'integrations/desktop/org.omarchy.OmaUsage.desktop.in').read_text().replace('@LAUNCHER@', _desktop_quote(launcher)).encode(),
         target['hook']: (project / 'integrations/bash/oma-usage.bash').read_bytes(),
+        target['terminal']: (project / 'integrations/bash/terminal.bash').read_bytes(),
     }
 
 
@@ -248,10 +252,10 @@ def _owned_runtime(manifest: dict) -> None:
     if target['data'].exists() and (not target['data'].is_dir()
                                      or target['data'].stat().st_uid != os.getuid()):
         raise InstallError('Refusing unowned backend data directory.')
-    allowed = {str(target[key]) for key in ('launcher', 'desktop', 'unit', 'hook')}
+    allowed = {str(target[key]) for key in ASSETS}
     if set(manifest['files']) - allowed:
         raise InstallError('Legacy or foreign ownership manifest. Remove the old installation explicitly before installing this backend.')
-    for key in ('launcher', 'desktop', 'unit', 'hook'):
+    for key in ASSETS:
         assert_owned(target[key], manifest)
     venv = target['venv']
     _safe_parents(venv)

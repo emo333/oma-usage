@@ -14,14 +14,14 @@ Omarchy owns the installed checkout. Backend setup owns only the external runtim
 | `BarWidget.qml` | Resolve the bootstrap beside the installed widget and launch it with the system Python in isolated mode. |
 | `bootstrap.py` | Native single-instance runtime consent, dependency preparation, update detection, and launch of the installed dashboard. |
 | `oma_usage/installer.py` | Validate the installed source location, serialize lifecycle operations, prepare the external venv, and track ownership of generated backend files. |
-| `oma_usage/setup.py` | Separate tracking consent and resumable setup stages: service, history import, Bash integration, plugin readiness, collectors. |
+| `oma_usage/setup.py` | Separate tracking consent and resumable setup stages: service, history import, plugin readiness, collectors. Never installs a shell startup hook. |
 | `oma_usage/uninstall.py` | Preview and remove the owned backend while retaining usage data and leaving Omarchy's checkout untouched. |
 | `Service.qml` | Foreground app-ID/idle observer. Send no titles or paths; reconnect without backfilling gaps. |
 | `oma_usage/daemon.py` | Single database writer, lock-state gate, collector status, and private same-UID socket protocol. |
 | `oma_usage/store.py`, `accounting.py` | Storage, validation, daily retention, and focus/service accounting invariants. |
 | `inventory.py`, `insights.py`, `recommendations.py` | Read-only inventory discovery, evidence reports, conservative package review, curated alternatives. |
 | `ui.py`, `cli.py` | Native dashboard, explicit actions, and bounded collector/maintenance commands. |
-| `integrations/` | Generated user-unit and desktop-entry templates plus the name-only Bash prompt hook. |
+| `integrations/` | User-unit and desktop-entry templates, opt-in Bash startup wrapper, and name-only prompt recorder. |
 
 The plugin manager has no install/update/remove script hooks. Never assume that cloning the repository runs Python setup or that removing the widget cleans up its external service. Runtime refresh follows a payload fingerprint rather than the manifest version alone. A native plugin update and an approved backend update are separate operations.
 
@@ -68,10 +68,11 @@ Use a disposable installation fixture, synthetic history, and a separate install
 | Native collector socket | Installed-wheel GLib watches accept peers, read/write responses, handle disconnects, and shut down without closing another socket or leaking the owned endpoint. The real Quickshell observer receives settings while collection is off. |
 | Native table/report lifecycle | Sort and activate real Record-backed rows, change the use-case filter, retain the prior report after a worker failure, and clear stale rows when the database becomes unreadable. |
 | Tracking preview/cancel | Exact managed paths and history source are shown; cancel starts no collectors and changes no shell startup configuration. |
-| Approve tracking | Actual stage outcomes are reported, selected synthetic history imports once, source states are honest, and only the managed startup block is added. |
+| Approve tracking | Actual stage outcomes are reported, selected synthetic history imports once, and app/service collection resumes. A retry after a legacy Bash startup failure succeeds without touching the startup file or following its symlink to write. |
+| Tracked terminal | The Commands action opens the default terminal with a one-session Bash wrapper. Real Bash loads normal settings, submits name-only prompt observations while enabled, and leaves ordinary terminals untracked, even with an old source block. |
 | Native update | Changed backend payload prompts a runtime update; unchanged payload does not. Approved update preserves user settings and pause state. |
 | Removal preview/cancel | No destructive effects. |
-| Approved backend removal | Owned service stops and cannot autostart, owned runtime/integration files disappear, exact source block is removed, usage/import state remains, plugin checkout survives. |
+| Approved backend removal | Owned service stops and cannot autostart, owned runtime/integration files disappear, any exact legacy startup block is removed, usage/import state remains, and the plugin checkout survives. |
 | Modified/foreign target | The conflicting file is preserved and a precise error is visible; unrelated files are not deleted. |
 | Plugin removed first | The still-installed backend CLI can clean up without reading the deleted checkout. |
 

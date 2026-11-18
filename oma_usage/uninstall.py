@@ -11,7 +11,6 @@ import stat
 
 from . import installer, store
 
-ASSETS = ('launcher', 'desktop', 'unit', 'hook')
 NEXT_STEP = 'Then remove the native plugin separately: omarchy plugin remove oma.usage'
 
 
@@ -101,14 +100,14 @@ def _service(target, manifest):
 def _plan():
     target = installer.locations()
     manifest = installer.read_manifest()
-    allowed = {str(target[name]) for name in ASSETS}
+    allowed = {str(target[name]) for name in installer.ASSETS}
     unexpected = set(manifest['files']) - allowed
     if unexpected:
         raise installer.InstallError('Ownership manifest contains non-backend paths; no cleanup performed: '
                                      + ', '.join(sorted(unexpected)) + '. Repair the manifest without deleting those paths.')
     _safe(target['manifest'])
     files = []
-    for name in ASSETS:
+    for name in installer.ASSETS:
         path = target[name]
         _safe(path)
         installer.assert_owned(path, manifest)
@@ -156,7 +155,7 @@ def _plan():
                'collection_enabled': settings['collection_enabled'],
                'retained': [str(store.paths()['data'] / 'usage.sqlite3'), str(config), str(target['plugin'])],
                'scopes': ['Remove only verified backend files and the owned external runtime',
-                          'Remove only the exact managed Bash source block; existing shells need restarting',
+                          'Remove only an exact legacy Bash source block, if present',
                           'Keep all usage, completed-history-import metadata, and settings; collection becomes disabled',
                           'Clear owned tracking setup state; do not disable or delete the Omarchy plugin'],
                'next_step': NEXT_STEP}

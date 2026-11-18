@@ -35,11 +35,13 @@ omarchy plugin enable oma.usage --section right
 Click **Usage**. First use has two separate approvals:
 
 1. **Runtime setup:** review the backend files and Python dependency downloads. Approval prepares an external private virtual environment and opens the dashboard. It does not import history, edit `.bashrc`, or enable collection.
-2. **Enable local tracking:** review exact paths, the selected Bash history source, collection scopes, and privacy limits. Approval enables the user service, performs the one-time history import, adds the managed Bash source block, and starts collection.
+2. **Enable local tracking:** review exact paths, the selected Bash history source, collection scopes, and privacy limits. Approval enables the user service, performs the one-time history import, and starts app and service collection. No shell startup files are edited.
 
-Canceling either approval does not authorize the next stage. Existing shells load the Bash hook only after opening a new shell or explicitly sourcing the installed hook. Failed tracking stages remain visible and can be retried.
+Canceling either approval does not authorize the next stage. Failed tracking stages remain visible and can be retried.
 
 Setup briefly waits for an asynchronous Omarchy plugin scan to finish. If plugin readiness times out or its IPC call fails, the failed stage stays visible and collection stays paused. Retry from Settings after the shell is ready.
+
+For optional live command counts, choose **Commands → Open tracked terminal**. Oma Usage opens Bash in your default terminal and loads your normal Bash configuration and a session-only prompt hook. Only commands visible in that session's Bash history are counted, after the prompt returns and while collection is enabled. Ordinary terminals are not tracked. No changes to `.bashrc`, `.zshrc`, or terminal settings are needed.
 
 Omarchy owns the installed Git checkout at `~/.config/omarchy/plugins/oma.usage`. The development repository is source only. The runtime is an installed copy in a separate virtual environment, not an editable import of either checkout. Backend setup never overwrites the plugin checkout, replaces `shell.json`, modifies `/usr/share/omarchy`, or installs native packages.
 
@@ -50,6 +52,8 @@ omarchy plugin update oma.usage
 ```
 
 Click **Usage** after an update. When backend source has changed, close the existing dashboard, then review and approve the runtime update. Updating the Git checkout alone does not update the installed Python runtime. An approved runtime update preserves tracking settings and may restart an already-running owned collector. It does not repeat the completed history import.
+
+If an earlier setup stopped at a Bash startup conflict, retry **Settings → Enable local tracking** after the backend update. Completed history is not reimported. Old startup blocks and prompt hooks stop recording with the new backend, including in already-open shells. The update does not remove the old block. You can remove it manually or let the separate backend removal preview identify it.
 
 ### Remove
 
@@ -69,7 +73,7 @@ The equivalent backend CLI first previews without changes, then requires an expl
 ~/.local/bin/oma-usage uninstall --yes
 ```
 
-Backend removal stops/disables the owned user service, removes the owned runtime and generated integration files, removes only the exact managed Bash source block, and leaves collection disabled. It preserves every byte outside that block, the usage database, history-import marker, and other user settings. Foreign or modified files are reported rather than silently deleted. Already-open Bash shells may retain the in-memory prompt function until closed; its missing helper is quiet.
+Backend removal stops/disables the owned user service, removes the owned runtime and generated integrations, and leaves collection disabled. If a previous version added an exact managed Bash source block, the removal preview lists it separately; no other startup content is removed. Usage data, the history-import marker, and other settings are retained. Foreign or modified files are reported rather than silently deleted. Already-open tracked shells may retain their in-memory prompt hook until closed; its missing helper is quiet.
 
 `omarchy plugin remove` only removes the plugin checkout. It has no backend uninstall hook. If you removed the plugin first, the installed `oma-usage uninstall` command still works. If you never approved runtime setup, there is no backend to remove.
 
@@ -80,8 +84,8 @@ Backend removal stops/disables the owned user service, removes the owned runtime
 | Usage does not open a setup window | Check Python/native prerequisites above. Run `/usr/bin/python3 -I ~/.config/omarchy/plugins/oma.usage/bootstrap.py` from a terminal to see startup errors. |
 | Dependency download or runtime build fails | Check network/package-index access and retry runtime setup. No tracking approval is implied. |
 | Setup reports a foreign or modified installation target | Review the reported file. Resolve the conflict explicitly; setup does not overwrite user files. |
-| `.bashrc` is linked, read-only, or has an edited managed block | Follow the displayed manual source instruction or repair that conflict before retrying tracking setup. |
-| No command observations from an existing terminal | Open a new Bash shell after setup. History omissions and disabled history remain coverage gaps. |
+| No app observations after earlier Bash startup conflict | Update the plugin and backend, then retry **Enable local tracking**. Check that Settings says collection is enabled. |
+| No live command observations | Open **Commands → Open tracked terminal** and return to the Bash prompt after running a history-visible command. Collection must be enabled. Ordinary terminals are not recorded. |
 | History import is incomplete | Check the selected readable history file in Settings and retry. Raw history is never persisted by the plugin. |
 | A source is unavailable | Inspect Settings and source coverage. Missing coverage is not evidence of zero use. |
 
@@ -119,7 +123,7 @@ Only sanitized identities and aggregates are stored. No raw history records, com
 | Collector socket | `$XDG_RUNTIME_DIR/oma-usage/collector.sock` |
 | Launcher | `~/.local/bin/oma-usage` |
 | Plugin | `~/.config/omarchy/plugins/oma.usage/` |
-| Bash hook | `$XDG_DATA_HOME/oma-usage/oma-usage.bash` |
+| Tracked Bash startup wrapper and recorder | `$XDG_DATA_HOME/oma-usage/terminal.bash` and `oma-usage.bash` in the same directory |
 | Installed Python runtime | `$XDG_DATA_HOME/oma-usage/venv/` |
 | Backend ownership manifest | `$XDG_DATA_HOME/oma-usage/installed-files.json` |
 | User service unit | `$XDG_CONFIG_HOME/systemd/user/oma-usage.service` |
@@ -131,7 +135,7 @@ Collection defaults off. Settings permit retention of 90/365 days, stale thresho
 
 Clear usage history requires confirmation. It deletes usage, coverage, and first/last evidence while retaining inventory, settings, sequence deduplication, and the completed-import marker. Previously imported Bash history is not reread after clearing.
 
-History is imported once transactionally, including an empty snapshot. Unreadable history remains explicitly not imported. The Bash hook preserves scalar/array prompt hooks and exit status, respects history omissions, and never rewrites history settings or forces history writes. Each helper invocation has a 250 ms deadline. Paused/unavailable preflight avoids reading the private record. Duplicate suppression, erased duplicates, disabled history, aliases/functions, unsupported packaging, remote activity, and undiscovered scripts remain coverage gaps.
+History is imported once transactionally, including an empty snapshot. Unreadable history remains explicitly not imported. The Bash hook baselines saved history at the first prompt without replaying it as live usage. It preserves scalar/array prompt hooks and exit status, respects history omissions, and never rewrites history settings or forces history writes. Each helper invocation has a 250 ms deadline. Paused/unavailable preflight avoids reading the private record. Duplicate suppression, erased duplicates, disabled history, aliases/functions, unsupported packaging, remote activity, and undiscovered scripts remain coverage gaps.
 
 Daemon downtime, observer reload/disconnect, idle, lock, suspend, pause, and clock discontinuities are never backfilled into app attention. An unknown lock state prevents app-time credit and qualifying desktop coverage.
 

@@ -37,7 +37,7 @@ class BackendRemovalTests(unittest.TestCase):
 
     def install_owned(self):
         files = {}
-        for name in uninstall.ASSETS:
+        for name in installer.ASSETS:
             path = self.target[name]
             path.parent.mkdir(parents=True, exist_ok=True)
             content = ('owned ' + name + '\n').encode()
@@ -71,7 +71,7 @@ class BackendRemovalTests(unittest.TestCase):
         self.assertEqual(store.load_config(), dict(self.config, collection_enabled=False))
         self.assertEqual((plugin / 'keep').read_text(), 'native Git checkout')
         self.assertFalse(self.target['venv'].exists())
-        self.assertTrue(all(not self.target[key].exists() for key in uninstall.ASSETS))
+        self.assertTrue(all(not self.target[key].exists() for key in installer.ASSETS))
         self.assertTrue(uninstall.remove_backend()['ok'])
 
     def test_modified_asset_blocks_every_destructive_step(self):

@@ -19,7 +19,7 @@ class InstallationSafetyTests(unittest.TestCase):
         for name in ('pyproject.toml', 'bootstrap.py', 'Service.qml', 'BarWidget.qml'):
             (self.project / name).write_text('initial payload')
         for name in ('systemd/oma-usage.service.in', 'desktop/org.omarchy.OmaUsage.desktop.in',
-                     'bash/oma-usage.bash'):
+                     'bash/oma-usage.bash', 'bash/terminal.bash'):
             path = self.project / 'integrations' / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text('@LAUNCHER@')
@@ -29,7 +29,7 @@ class InstallationSafetyTests(unittest.TestCase):
                            venv=self.root / 'data/venv', manifest=self.root / 'data/installed-files.json',
                            launcher=self.root / 'bin/oma-usage', desktop=self.root / 'apps/oma.desktop',
                            unit=self.root / 'systemd/oma-usage.service', plugin=self.project,
-                           hook=self.root / 'data/oma-usage.bash')
+                           hook=self.root / 'data/oma-usage.bash', terminal=self.root / 'data/terminal.bash')
         mock_locations = patch.object(installer, 'locations', return_value=self.target)
         mock_locations.start()
         self.addCleanup(mock_locations.stop)

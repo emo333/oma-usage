@@ -29,7 +29,6 @@ class PluginReadinessTests(unittest.TestCase):
         self.requests = 0
         patches.enter_context(patch.object(setup, 'preflight'))
         patches.enter_context(patch.object(setup, '_installed'))
-        patches.enter_context(patch.object(setup, '_hook', return_value='pending_new_shell'))
         patches.enter_context(patch.object(cli, 'import_history', return_value={'ok': True, 'status': 'imported'}))
         patches.enter_context(patch.object(setup, 'run_command', side_effect=self.command))
         patches.enter_context(patch.object(setup.client, 'observer_settings', side_effect=lambda **_: self.settings()))
@@ -108,3 +107,32 @@ class PluginReadinessTests(unittest.TestCase):
                 result, saved = self.run_setup()
                 self.assert_paused_failure(result, saved)
                 self.assertEqual(self.elapsed, 0)
+
+    def test_retry_old_setup_after_bash_failure_leaves_startup_untouched(self):
+        startup = self.home / '.bashrc'
+        target = self.home / 'linked config'
+        target.write_bytes(b'# existing shell configuration\n')
+        target.chmod(0o400)
+        startup.symlink_to(target)
+        state_file = store.paths()['config'] / 'setup-state.json'
+        state_file.parent.mkdir(parents=True)
+        state_file.write_text(json.dumps({
+            'owner': installer.OWNER,
+            'complete': False,
+            'resume_on_success': True,
+            'history_file': str(self.home / 'synthetic-history'),
+            'stages': dict.fromkeys((*setup.STAGES, 'hook'), 'not_started') | {'hook': 'failed'},
+            'error': 'bash_startup_custom',
+            'manual_source': 'legacy setup instruction',
+        }))
+
+        preview = setup.preview()
+        self.assertNotIn(str(startup), preview['paths'])
+        result, saved = self.run_setup()
+        self.assertTrue(result['ok'], result)
+        self.assertTrue(saved['complete'])
+        self.assertNotIn('hook', saved['stages'])
+        self.assertNotIn('manual_source', saved)
+        self.assertTrue(store.load_config()['collection_enabled'])
+        self.assertEqual(startup.readlink(), target)
+        self.assertEqual(target.read_bytes(), b'# existing shell configuration\n')

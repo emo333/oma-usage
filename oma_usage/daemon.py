@@ -409,6 +409,8 @@ class Daemon:
         else:
             raise ProtocolError('invalid_action')
         save_config(updated)
+        if updated['collection_enabled'] and not self.enabled:
+            self.store.status('bash_live', 'starting', now)
         self.config = updated
         self.store.metadata('settings', json.dumps(self.config))
         self._reset()

@@ -1,7 +1,7 @@
 """Consent-only setup operations; invoke on a worker, never the GTK main thread.
 
 preview/status are read-only. Only enable_tracking starts services, imports the
-selected history snapshot, changes Bash startup, or enables the Omarchy plugin.
+selected history snapshot, or enables the Omarchy plugin. No startup file edits.
 """
 from __future__ import annotations
 
@@ -9,18 +9,14 @@ import fcntl
 import json
 import os
 from pathlib import Path
-import shlex
 import sqlite3
-import stat
 import time
 
 from . import client, store
 from .installer import (OWNER, InstallError, assert_owned, atomic_write, locations,
                         preflight, read_manifest, run_command, lifecycle_lock)
 
-STAGES = ('preflight', 'service', 'history', 'hook', 'plugin', 'collectors')
-START = b'# >>> oma-usage >>>'
-END = b'# <<< oma-usage <<<'
+STAGES = ('preflight', 'service', 'history', 'plugin', 'collectors')
 
 
 class SetupError(Exception):
@@ -37,10 +33,6 @@ def _history_file(selected=None) -> str:
     return str(Path(selected if selected is not None else os.environ.get('HISTFILE') or Path.home() / '.bash_history').expanduser().absolute())
 
 
-def _source() -> str:
-    return 'source ' + shlex.quote(str(locations()['hook']))
-
-
 def preview(history_file=None) -> dict:
     """Describe exact requested changes without opening the history file."""
     target = locations()
@@ -48,8 +40,8 @@ def preview(history_file=None) -> dict:
                target['unit'],
                target['unit'].parent / 'graphical-session.target.wants/oma-usage.service',
                Path.home() / '.config/omarchy/shell.json',
-               target['hook'], store.paths()['config'] / 'config.json', _state_path(),
-               store.paths()['config'] / 'setup.lock', Path.home() / '.bashrc',
+               store.paths()['config'] / 'config.json', _state_path(),
+               store.paths()['config'] / 'setup.lock',
                store.paths()['data'] / 'usage.sqlite3',
                store.paths()['data'] / 'usage.sqlite3-wal',
                store.paths()['data'] / 'usage.sqlite3-shm',
@@ -58,7 +50,7 @@ def preview(history_file=None) -> dict:
         managed.append(store.paths()['runtime'] / 'collector.sock')
     return {'paths': [str(path) for path in managed], 'history_file': _history_file(history_file),
             'scopes': ['Estimated foreground app attention (app IDs only; idle and lock excluded)',
-                       'One-time Bash history command-name mentions, then history-visible prompt submissions',
+                       'One-time Bash history command-name mentions; live command tracking only in separately opened tracked terminals',
                        'Observed user and system service running time and starts',
                        'Installed packages, launchers, executable names, and service inventory',
                        'Enable the user service and add Usage to the bar only if absent; preserve existing placement; Omarchy manages shell.json'],
@@ -77,9 +69,15 @@ def _read_state() -> dict | None:
         if (state['owner'] != OWNER or type(state['complete']) is not bool
                 or type(state['resume_on_success']) is not bool
                 or not isinstance(state['stages'], dict)
-                or set(state['stages']) != set(STAGES)
                 or any(not isinstance(value, str) for value in state['stages'].values())
                 or not isinstance(state['history_file'], str)):
+            raise ValueError
+        stages = state['stages']
+        if set(stages) == {*STAGES, 'hook'}:
+            # Retire the persisted shell startup stage without touching its file.
+            del stages['hook']
+            state.pop('manual_source', None)
+        if set(stages) != set(STAGES):
             raise ValueError
         return state
     except (OSError, ValueError, KeyError, TypeError):
@@ -105,8 +103,6 @@ def _result(state, *, error=None, sources=None) -> dict:
     if error or state.get('error'):
         result['error'] = error or state['error']
         result['ok'] = False
-    if state.get('manual_source'):
-        result['manual_source'] = state['manual_source']
     if sources is not None:
         result['sources'] = sources
     return result
@@ -169,7 +165,7 @@ def _paused_config(config: dict) -> None:
 def _installed() -> None:
     target = locations()
     manifest = read_manifest()
-    expected = [target['launcher'], target['desktop'], target['unit'], target['hook']]
+    expected = [target[key] for key in ('launcher', 'desktop', 'unit')]
     for path in expected:
         if not path.is_file() or str(path) not in manifest['files']:
             raise SetupError('installation_missing')
@@ -180,41 +176,6 @@ def _installed() -> None:
             or not marker.is_file() or marker.read_text() != OWNER
             or not (venv / 'bin/python').is_file()):
         raise SetupError('installation_missing')
-
-
-def _hook() -> str:
-    """Append one exact block; preserve every pre-existing unrelated byte."""
-    path = Path.home() / '.bashrc'
-    block = START + b'\n' + _source().encode() + b'\n' + END + b'\n'
-    try:
-        if path.is_symlink():
-            raise SetupError('bash_startup_custom')
-        if path.exists():
-            mode = path.stat().st_mode
-            if not stat.S_ISREG(mode):
-                raise SetupError('bash_startup_custom')
-            original = path.read_bytes()
-            if START in original or END in original:
-                if original.count(START) != 1 or original.count(END) != 1:
-                    raise SetupError('bash_block_conflict')
-                offset = original.index(START)
-                if (offset and original[offset - 1:offset] != b'\n') or original[offset:offset + len(block)] != block:
-                    raise SetupError('bash_block_conflict')
-                return 'pending_new_shell'
-            if not mode & 0o222:
-                raise SetupError('bash_startup_readonly')
-            permissions = stat.S_IMODE(mode)
-        else:
-            original = b''
-            permissions = 0o600
-        parent_mode = path.parent.stat().st_mode
-        if not parent_mode & 0o222:
-            raise SetupError('bash_startup_readonly')
-        separator = b'\n' if original and not original.endswith(b'\n') else b''
-        atomic_write(path, original + separator + block, permissions)
-        return 'pending_new_shell'
-    except OSError:
-        raise SetupError('bash_startup_unwritable') from None
 
 
 def _wait_collectors(seconds=8) -> tuple[bool, dict]:
@@ -238,7 +199,7 @@ def _wait_collectors(seconds=8) -> tuple[bool, dict]:
 def enable_tracking(history_file=None) -> dict:
     """Perform explicitly consented setup, persisting every actual stage outcome.
 
-    Failures before hook/plugin readiness leave collection paused. Independent
+    Failures before plugin readiness leave collection paused. Independent
     source failures keep authorized working sources running and setup incomplete.
     Completed setup preserves the effective pause setting when retried.
     """
@@ -266,7 +227,6 @@ def enable_tracking(history_file=None) -> dict:
         if history_file is not None:
             state['history_file'] = _history_file(history_file)
         state.pop('error', None)
-        state.pop('manual_source', None)
         _save(state)
         try:
             preflight()
@@ -305,13 +265,6 @@ def enable_tracking(history_file=None) -> dict:
         else:
             state['stages']['history'] = 'not_imported'
             state['error'] = imported['error']
-        _save(state)
-        stage = 'hook'
-        try:
-            state['stages']['hook'] = _hook()
-        except SetupError:
-            state['manual_source'] = _source()
-            raise
         _save(state)
         stage = 'plugin'
         run_command(['omarchy-shell', 'shell', 'rescanPlugins'])
@@ -354,7 +307,7 @@ def enable_tracking(history_file=None) -> dict:
     except (SetupError, client.ClientError, InstallError, OSError, RuntimeError, sqlite3.Error, ValueError) as exc:
         code = exc.code if isinstance(exc, (SetupError, client.ClientError)) else {
             'preflight': 'preflight_failed', 'service': 'service_start_failed',
-            'history': 'history_import_failed', 'hook': 'bash_startup_unwritable',
+            'history': 'history_import_failed',
             'plugin': 'plugin_enable_failed', 'collectors': 'collectors_unavailable'}[stage]
         if paused:
             try:
