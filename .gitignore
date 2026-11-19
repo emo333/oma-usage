@@ -41,6 +41,9 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 
+# Rust build outputs; the application lockfile is checked in.
+/dashboard/target/
+
 # Private usage databases, backups, and SQLite sidecars
 *.db
 *.db-*

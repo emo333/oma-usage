@@ -514,6 +514,7 @@ class Daemon:
             self.focus.reset()
 
     def _submit(self, kind, work):
+        submitted_at = time.monotonic()
         future = self.executor.submit(work)
         def finished(done):
             try:
@@ -521,16 +522,19 @@ class Daemon:
             except Exception:
                 value, error = None, f'{kind}_unavailable'
             if not self.closed:
-                self.GLib.idle_add(self._worker_done, kind, value, error)
+                # D-Bus and socket callbacks otherwise starve default-idle
+                # delivery, leaving lock state expired even after a good reply.
+                self.GLib.idle_add(self._worker_done, kind, value, error, submitted_at,
+                                   priority=self.GLib.PRIORITY_DEFAULT)
         future.add_done_callback(finished)
 
-    def _worker_done(self, kind, value, error):
+    def _worker_done(self, kind, value, error, submitted_at):
         if self.closed:
             return False
         if kind == 'lock':
             self.lock_pending = False
-            self.lock_unlocked = value if error is None else None
-            self.lock_checked = time.monotonic()
+            self.lock_checked = submitted_at
+            self.lock_unlocked = value if error is None and time.monotonic() - submitted_at <= 7 else None
             if self.lock_unlocked is not True:
                 self.focus.reset()
         else:

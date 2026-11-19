@@ -18,6 +18,18 @@ def main() -> int:
         raise RuntimeError('The installed Omarchy plugin is incomplete. Update or reinstall it with Omarchy.')
     installer = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(installer)
+    def launch_dashboard():
+        subprocess.Popen([str(installer.locations()['venv'] / 'bin/python'),
+                          '-I', '-m', 'oma_usage'], cwd='/')
+
+    try:
+        if installer.runtime_current(project):
+            launch_dashboard()
+            return 0
+    except (OSError, installer.InstallError):
+        # The consent window reports ownership and startup errors explicitly.
+        pass
+
     try:
         installer._project(project)
         import gi
@@ -56,9 +68,15 @@ def main() -> int:
             scroll = Gtk.ScrolledWindow(vexpand=True)
             target = installer.locations()
             paths = [target[key] for key in ('venv', 'manifest', *installer.ASSETS)]
-            details = ('With your approval, install or refresh the local Python backend and its dependencies. '
-                       'pip downloads build tools and Python dependencies from the configured package index. '
-                       'A temporary build copy is used; the Omarchy plugin checkout is never changed.\n\n'
+            details = ('With your approval, build and install the local Python backend and Rust GPUI dashboard. '
+                       'pip downloads build tools and Python dependencies; Cargo downloads locked Rust dependencies. '
+                       'The first build can take tens of minutes and requires substantial temporary disk space. '
+                       'Install any missing native prerequisites before approving:\n'
+                       + installer.NATIVE_PREREQUISITE + '\n'
+                       'A working Vulkan driver is required to display the dashboard. Install missing packages '
+                       'yourself before approving; setup does not install system packages. '
+                       'An isolated temporary build directory under /var/tmp is removed after setup; '
+                       'the Omarchy plugin checkout is never changed. Allow several GiB of free space there.\n\n'
                        'Files created or replaced:\n' + '\n'.join(str(path) for path in paths)
                        + '\nSetup lock: ' + str(target['config'] / 'setup.lock')
                        + '\n\nClose any existing Oma Usage dashboard before approving an update. '
@@ -135,8 +153,7 @@ def main() -> int:
 
         def launch(self):
             try:
-                subprocess.Popen([str(installer.locations()['venv'] / 'bin/python'),
-                                  '-I', '-m', 'oma_usage'], cwd='/')
+                launch_dashboard()
             except OSError as exc:
                 self.status.set_text('Cannot launch the installed dashboard: ' + str(exc))
                 self.cancel.set_sensitive(True)

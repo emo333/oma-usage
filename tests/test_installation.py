@@ -25,6 +25,10 @@ class InstallationSafetyTests(unittest.TestCase):
             path.write_text('@LAUNCHER@')
         (self.project / 'oma_usage').mkdir()
         (self.project / 'oma_usage/__main__.py').write_text('print("initial")')
+        (self.project / 'dashboard/src').mkdir(parents=True)
+        (self.project / 'dashboard/Cargo.toml').write_text('manifest')
+        (self.project / 'dashboard/Cargo.lock').write_text('lock')
+        (self.project / 'dashboard/src/main.rs').write_text('source')
         self.target = dict(data=self.root / 'data', config=self.root / 'config',
                            venv=self.root / 'data/venv', manifest=self.root / 'data/installed-files.json',
                            launcher=self.root / 'bin/oma-usage', desktop=self.root / 'apps/oma.desktop',
@@ -61,14 +65,43 @@ class InstallationSafetyTests(unittest.TestCase):
             path.write_bytes(content)
         (self.target['venv'] / 'bin').mkdir(parents=True)
         (self.target['venv'] / 'bin/python').touch()
+        dashboard = self.target['venv'] / 'bin/oma-usage-dashboard'
+        dashboard.write_bytes(b'dashboard')
+        dashboard.chmod(0o700)
         (self.target['venv'] / '.oma-usage-owned').write_text(installer.OWNER)
         self.target['manifest'].write_text(json.dumps({
             'owner': installer.OWNER, 'venv': True,
             'files': {str(path): installer._digest(content) for path, content in assets.items()},
+            'dashboard_digest': installer._digest(b'dashboard'),
             'source_digest': installer._source_digest(self.project)}))
         self.assertTrue(installer.runtime_current(self.project))
         (self.project / 'oma_usage/__main__.py').write_text('print("updated")')
         self.assertFalse(installer.runtime_current(self.project))
+
+    def test_rust_source_and_lockfile_are_payload_inputs(self):
+        initial = installer._source_digest(self.project)
+        source = self.project / 'dashboard/src/main.rs'
+        source.write_text('changed source')
+        changed = installer._source_digest(self.project)
+        self.assertNotEqual(initial, changed)
+        (self.project / 'dashboard/Cargo.lock').write_text('changed lock')
+        self.assertNotEqual(changed, installer._source_digest(self.project))
+        target = self.project / 'dashboard/target'
+        target.mkdir()
+        (target / 'generated').write_text('ignored')
+        self.assertNotIn(target / 'generated', installer._payload(self.project))
+
+    def test_modified_dashboard_is_not_replaced_or_removed(self):
+        venv = self.target['venv']
+        (venv / 'bin').mkdir(parents=True)
+        (venv / '.oma-usage-owned').write_text(installer.OWNER)
+        binary = venv / 'bin/oma-usage-dashboard'
+        binary.write_bytes(b'foreign modification')
+        manifest = {'owner': installer.OWNER, 'venv': True, 'files': {},
+                    'dashboard_digest': installer._digest(b'original')}
+        with self.assertRaises(installer.InstallError):
+            installer._owned_runtime(manifest)
+        self.assertEqual(binary.read_bytes(), b'foreign modification')
 
     def test_unowned_backend_file_is_preserved_and_reported(self):
         launcher = self.target['launcher']

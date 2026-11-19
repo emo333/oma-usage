@@ -15,7 +15,8 @@ import stat
 import sys
 
 OWNER = 'org.omarchy.OmaUsage:1'
-NATIVE_PREREQUISITE = 'omarchy pkg add python-gobject gtk4 libadwaita'
+NATIVE_PREREQUISITE = ('omarchy pkg add python-gobject gtk4 libadwaita rust base-devel '
+                       'fontconfig libxkbcommon-x11 wayland vulkan-icd-loader')
 
 
 class InstallError(Exception):
@@ -37,11 +38,11 @@ def locations() -> dict[str, Path]:
                 hook=data / 'oma-usage.bash', terminal=data / 'terminal.bash')
 
 
-def run_command(args: list[str], *, timeout=15) -> str:
+def run_command(args: list[str], *, timeout=15, env=None, cwd=None) -> str:
     """Bounded external boundary; errors never echo subprocess output."""
     try:
         result = subprocess.run(args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE, timeout=timeout, check=False)
+                                stderr=subprocess.PIPE, timeout=timeout, check=False, env=env, cwd=cwd)
     except (OSError, subprocess.TimeoutExpired):
         raise InstallError('Command unavailable or timed out: ' + Path(args[0]).name) from None
     if result.returncode:
@@ -67,6 +68,9 @@ def preflight() -> None:
     for binary in ('pacman', 'systemctl', 'omarchy', 'omarchy-shell'):
         if not shutil.which(binary):
             raise InstallError('Required command missing: ' + binary)
+    for binary in ('cargo', 'rustc'):
+        if not (Path('/usr/bin') / binary).is_file():
+            raise InstallError('Required system Rust toolchain missing: /usr/bin/' + binary)
     enable_command = shutil.which('omarchy-plugin-enable')
     if enable_command is None:
         raise InstallError('Required command missing: omarchy-plugin-enable')
@@ -146,6 +150,11 @@ def read_manifest() -> dict:
     return value
 
 
+def _file_digest(path: Path) -> str:
+    with path.open('rb') as handle:
+        return hashlib.file_digest(handle, 'sha256').hexdigest()
+
+
 def _digest(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
@@ -215,10 +224,13 @@ def _payload(project: Path) -> list[Path]:
     # These are the complete wheel/build inputs; ignore Git state and generated files.
     files = [project / name for name in
              ('pyproject.toml', 'manifest.json', 'bootstrap.py', 'Service.qml', 'BarWidget.qml')]
-    for folder in ('oma_usage', 'integrations'):
+    for folder in ('oma_usage', 'integrations', 'dashboard'):
         files.extend(path for path in (project / folder).rglob('*')
                      if path.is_file() and '__pycache__' not in path.parts
+                     and not (folder == 'dashboard' and 'target' in path.relative_to(project / folder).parts)
                      and path.suffix not in ('.pyc', '.pyo'))
+    files.extend((project / 'dashboard/Cargo.toml', project / 'dashboard/Cargo.lock'))
+    files = list(set(files))
     if any(path.is_symlink() for path in files):
         raise InstallError('Symbolic links are not supported in the plugin build payload.')
     return sorted(files)
@@ -246,7 +258,7 @@ def _assets(project: Path) -> dict[Path, bytes]:
     }
 
 
-def _owned_runtime(manifest: dict) -> None:
+def _owned_runtime(manifest: dict) -> str | None:
     target = locations()
     _safe_parents(target['data'])
     if target['data'].exists() and (not target['data'].is_dir()
@@ -264,6 +276,16 @@ def _owned_runtime(manifest: dict) -> None:
                           or marker.is_symlink() or marker.read_text() != OWNER
                           or venv.stat().st_uid != os.getuid()):
         raise InstallError('Refusing unrelated virtualenv: ' + str(venv))
+    binary = venv / 'bin/oma-usage-dashboard'
+    _safe_parents(binary)
+    actual_digest = None
+    if binary.exists():
+        actual_digest = _file_digest(binary) if binary.is_file() else None
+        expected = manifest.get('dashboard_digest')
+        if (actual_digest is None or binary.stat().st_uid != os.getuid()
+                or actual_digest not in (expected, manifest.get('dashboard_pending_digest'))):
+            raise InstallError('Refusing foreign or modified dashboard binary: ' + str(binary))
+    return actual_digest
 
 
 def runtime_current(project: Path) -> bool:
@@ -275,6 +297,9 @@ def runtime_current(project: Path) -> bool:
     assets = _assets(project)
     return (manifest.get('source_digest') == _source_digest(project)
             and manifest['venv'] and (target['venv'] / 'bin/python').is_file()
+            and (target['venv'] / 'bin/oma-usage-dashboard').is_file()
+            and isinstance(manifest.get('dashboard_digest'), str)
+            and os.access(target['venv'] / 'bin/oma-usage-dashboard', os.X_OK)
             and all(path.is_file() and manifest['files'].get(str(path)) == _digest(content)
                     for path, content in assets.items()))
 
@@ -334,7 +359,7 @@ def install(project: Path, *, check_only=False) -> dict:
         source_digest = _source_digest(project)
         python = target['venv'] / 'bin/python'
         # Build from a disposable copy: setuptools must never touch the Git checkout.
-        with tempfile.TemporaryDirectory(prefix='oma-usage-build-') as directory:
+        with tempfile.TemporaryDirectory(prefix='oma-usage-build-', dir='/var/tmp') as directory:
             temporary = Path(directory)
             source, wheels = temporary / 'source', temporary / 'wheels'
             source.mkdir()
@@ -347,9 +372,10 @@ def install(project: Path, *, check_only=False) -> dict:
                 raise InstallError('Plugin changed during setup. Retry after the plugin update finishes.')
             try:
                 builder = temporary / 'builder'
-                run_command(['/usr/bin/python3', '-I', '-m', 'venv', str(builder)], timeout=120)
+                wheel_env = dict(os.environ, PIP_CACHE_DIR=str(temporary / 'pip-cache'), TMPDIR=str(temporary))
+                run_command(['/usr/bin/python3', '-I', '-m', 'venv', str(builder)], timeout=120, env=wheel_env)
                 run_command([str(builder / 'bin/python'), '-I', '-m', 'pip', 'wheel',
-                             '--wheel-dir', str(wheels), str(source)], timeout=300)
+                             '--wheel-dir', str(wheels), str(source)], timeout=300, env=wheel_env)
             except InstallError as exc:
                 raise InstallError('Could not download/build the backend wheel. Check network access and '
                                    'your pip package index; install prerequisites with: '
@@ -357,6 +383,20 @@ def install(project: Path, *, check_only=False) -> dict:
             project_wheels = list(wheels.glob('oma_usage-*.whl'))
             if len(project_wheels) != 1:
                 raise InstallError('Expected exactly one oma-usage project wheel.')
+            build_env = {key: value for key, value in os.environ.items()
+                         if not key.startswith(('CARGO_', 'RUST'))}
+            build_env.update(HOME=str(temporary), CARGO_HOME=str(temporary / 'cargo'),
+                             CARGO_TARGET_DIR=str(temporary / 'target'), TMPDIR=str(temporary), PATH='/usr/bin:/bin')
+            try:
+                run_command(['/usr/bin/cargo', 'build', '--locked', '--manifest-path',
+                             str(source / 'dashboard/Cargo.toml')], timeout=1800, env=build_env, cwd=source)
+            except InstallError as exc:
+                raise InstallError('Could not download/build the Rust dashboard. Check the system Rust '
+                                   'toolchain, native development dependencies and network access. ' + str(exc)) from None
+            built_dashboard = temporary / 'target/debug/oma-usage-dashboard'
+            if not built_dashboard.is_file():
+                raise InstallError('The Rust build did not produce oma-usage-dashboard.')
+            dashboard_content = built_dashboard.read_bytes()
             _require_closed_dashboard()
             active = _active_owned_collector(manifest)
             manifest.pop('source_digest', None)
@@ -371,10 +411,17 @@ def install(project: Path, *, check_only=False) -> dict:
                 manifest['venv'] = True
                 atomic_write(target['manifest'], json.dumps(manifest, sort_keys=True).encode())
             run_command(['/usr/bin/python3', '-I', '-m', 'venv', '--system-site-packages',
-                         str(target['venv'])], timeout=120)
+                         str(target['venv'])], timeout=120, env=wheel_env)
             run_command([str(python), '-I', '-m', 'pip', 'install', '--no-index',
                          '--find-links', str(wheels), '--force-reinstall',
-                         str(project_wheels[0])], timeout=300)
+                         str(project_wheels[0])], timeout=300, env=wheel_env)
+            manifest['dashboard_pending_digest'] = _digest(dashboard_content)
+            atomic_write(target['manifest'], json.dumps(manifest, sort_keys=True).encode())
+            dashboard = target['venv'] / 'bin/oma-usage-dashboard'
+            atomic_write(dashboard, dashboard_content, 0o700)
+            manifest['dashboard_digest'] = _digest(dashboard_content)
+            manifest.pop('dashboard_pending_digest', None)
+            atomic_write(target['manifest'], json.dumps(manifest, sort_keys=True).encode())
         for path, content in assets.items():
             atomic_write(path, content, 0o700 if path == target['launcher'] else 0o600)
             manifest['files'][str(path)] = _digest(content)

@@ -86,6 +86,21 @@ class BackendRemovalTests(unittest.TestCase):
         self.assertEqual(store.load_config(), self.config)
         self.assertFalse(self.commands)
 
+    def test_modified_dashboard_blocks_cleanup(self):
+        self.install_owned()
+        binary = self.target['venv'] / 'bin/oma-usage-dashboard'
+        binary.parent.mkdir()
+        binary.write_bytes(b'modified')
+        manifest = json.loads(self.target['manifest'].read_text())
+        manifest['dashboard_digest'] = hashlib.sha256(b'original').hexdigest()
+        self.target['manifest'].write_text(json.dumps(manifest))
+        result = uninstall.remove_backend()
+        self.assertFalse(result['ok'])
+        self.assertIn(str(binary), result['error'])
+        self.assertEqual(binary.read_bytes(), b'modified')
+        self.assertEqual(store.load_config(), self.config)
+        self.assertFalse(self.commands)
+
     def test_manifest_cannot_authorize_arbitrary_paths(self):
         self.install_owned()
         foreign = self.home / 'personal-file'

@@ -121,9 +121,9 @@ def status() -> dict:
         result = _result(state, sources=sources)
         if state['complete']:
             try:
-                settings = client.observer_settings(timeout=0.2)
-            except client.ClientError:
-                result.update(ok=False, error='collector_unavailable')
+                settings = client.observer_settings(timeout=2)
+            except client.ClientError as exc:
+                result.update(ok=False, error=exc.code)
             else:
                 result['collection_enabled'] = settings['collection_enabled']
                 if settings['collection_enabled'] and any(sources.get(source, {}).get('state') != 'collecting'

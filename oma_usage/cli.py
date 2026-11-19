@@ -150,6 +150,81 @@ def _tracked_shell() -> int:
         return 1
 
 
+def _dashboard() -> int:
+    """Own the single-instance D-Bus name for the lifetime of the GPUI child."""
+    import os
+    from pathlib import Path
+    import subprocess
+    import sys
+    from gi.repository import Gio, GLib  # pyright: ignore[reportMissingModuleSource]
+    from . import installer
+
+    def report(message):
+        print(message, file=sys.stderr)
+        try:
+            subprocess.run(['notify-send', '--app-name=Oma Usage', '--urgency=critical',
+                            'Oma Usage dashboard unavailable', message],
+                           check=False, timeout=5)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+
+    class DashboardProxy(Gio.Application):
+        def __init__(self):
+            super().__init__(application_id='org.omarchy.OmaUsage')
+            self.child: subprocess.Popen[bytes] | None = None
+            self.exit_code = 0
+
+        def do_activate(self):
+            if self.child is not None:
+                try:
+                    pipe = self.child.stdin
+                    if pipe is None:
+                        raise OSError('Dashboard activation pipe is unavailable.')
+                    pipe.write(b'activate\n')
+                    pipe.flush()
+                except (BrokenPipeError, OSError, ValueError):
+                    report('The running dashboard cannot be activated. Close it and try again.')
+                return
+            try:
+                with installer.lifecycle_lock():
+                    manifest = installer.read_manifest()
+                    digest = installer._owned_runtime(manifest)
+                    binary = installer.locations()['venv'] / 'bin/oma-usage-dashboard'
+                    if (not binary.is_file() or not os.access(binary, os.X_OK)
+                            or not isinstance(manifest.get('dashboard_digest'), str)
+                            or digest != manifest['dashboard_digest']):
+                        raise installer.InstallError('The dashboard binary is missing or does not match its ownership manifest.')
+                    self.child = subprocess.Popen([str(binary), str(Path(sys.executable).absolute())],
+                                                  stdin=subprocess.PIPE, cwd='/')
+            except (OSError, installer.InstallError) as exc:
+                report('Cannot start the installed dashboard: ' + str(exc))
+                self.exit_code = 1
+                self.quit()
+                return
+            self.hold()
+            GLib.timeout_add(250, self.child_exited)
+
+        def child_exited(self):
+            child = self.child
+            if child is None:
+                return False
+            status = child.poll()
+            if status is None:
+                return True
+            self.exit_code = status
+            if self.exit_code:
+                report('The dashboard exited with status ' + str(self.exit_code) + '.')
+            if child.stdin is not None:
+                child.stdin.close()
+            self.child = None
+            self.release()
+            return False
+
+    application = DashboardProxy()
+    status = application.run([sys.argv[0]])
+    return application.exit_code or status
+
+
 def main(argv=None) -> int:
     import sys
 
@@ -192,7 +267,7 @@ def main(argv=None) -> int:
         if args.command == 'daemon':
             from .daemon import main as run
         else:
-            from .ui import main as run
+            run = _dashboard
         result = run()
         return result if type(result) is int else 0
     except ImportError:

@@ -59,11 +59,8 @@ class _BusMonitor:
         self.last_sync = float('-inf')
         self.last_flush = float('-inf')
         self.listing = False
-        self.states = {}  # object path -> (unit name, ActiveState, SubState)
-        self.overlay = {}
-        self.pending_properties = {}
-        self.revisions = {}
-        self.pending_names = {}
+        self.states = {}  # object path -> (unit name, ActiveState or None, SubState or None)
+        self.overlay = []
         self.applied_paths = {}
         self.events = deque()
         self.was_enabled = False
@@ -158,8 +155,7 @@ class _BusMonitor:
         if self.listing or self.connection is None:
             return
         self.listing = True
-        self.overlay = {}
-        self.pending_properties = {}
+        self.overlay = []
         self.last_sync = time.monotonic()
         parameters = self.owner.GLib.Variant('(asas)', ([], ['*.service']))
         self._call(MANAGER_PATH, MANAGER, 'ListUnitsByPatterns', parameters,
@@ -173,101 +169,70 @@ class _BusMonitor:
         states = {}
         for row in value[0]:
             name, _description, _load, active, sub, _following, path, *_job = row
-            if _unit_name(name) and _state(active) and _state(sub):
-                states[path] = (name, active, sub)
-        states.update(self.overlay)
-        for path, (changed, invalidated) in self.pending_properties.items():
-            row = states.get(path)
-            if row is not None:
-                active = changed.get('ActiveState', row[1])
-                sub = changed.get('SubState', row[2])
-                if _state(active) and _state(sub):
-                    states[path] = (row[0], active, sub)
-        self.states = {path: row for path, row in states.items() if row is not None}
-        self.overlay = {}
+            if _unit_name(name):
+                states[path] = (name, active if _state(active) else None,
+                                sub if _state(sub) else None)
+        for kind, path, payload in self.overlay:
+            self._apply_signal(states, kind, path, payload)
+        self.states = states
+        self.overlay = []
         self.ready = True
         self.error = None
-        self._enqueue('baseline', self.states.copy())
-        for path, (_changed, invalidated) in self.pending_properties.items():
-            if invalidated and path in self.states:
-                self._fetch(path, self.states[path][0])
-        self.pending_properties = {}
+        self._enqueue('baseline', self._complete_states())
 
-    def _change(self, path, row):
+    def _complete_states(self):
+        return {path: row for path, row in self.states.items()
+                if row[1] is not None and row[2] is not None}
+
+    @staticmethod
+    def _apply_signal(states, kind, path, payload):
+        old = states.get(path)
+        if kind == 'new':
+            if old is None or old[0] != payload:
+                states[path] = (payload, None, None)
+        elif kind == 'removed':
+            states.pop(path, None)
+        elif old is not None:
+            states[path] = (old[0], payload.get('ActiveState', old[1]),
+                            payload.get('SubState', old[2]))
+
+    def _signal(self, kind, path, payload):
         if self.listing:
-            self.overlay[path] = row
-        if row is None:
-            self.states.pop(path, None)
-        else:
-            self.states[path] = row
-        if self.ready:
-            self._enqueue('change', (path, row))
+            if len(self.overlay) >= MAX_PENDING:
+                self._fail('service_event_overflow')
+                return
+            self.overlay.append((kind, path, payload))
+        old = self.states.get(path)
+        self._apply_signal(self.states, kind, path, payload)
+        row = self.states.get(path)
+        if self.ready and row != old:
+            # An incomplete state is absent from accounting until both fields
+            # are known again; its return cannot establish an observed start.
+            complete = row if row is not None and None not in row else None
+            if complete is not None or (old is not None and None not in old):
+                self._enqueue('change', (path, complete, kind == 'removed'))
 
     def _unit_new(self, _connection, _sender, _path, _interface, _signal, parameters):
         name, path = parameters.unpack()
         if _unit_name(name):
-            self.revisions[path] = self.revisions.get(path, 0) + 1
-            self.pending_properties.pop(path, None)
-            self.pending_names[path] = name
-            self._fetch(path, name)
+            self._signal('new', path, name)
 
     def _unit_removed(self, _connection, _sender, _path, _interface, _signal, parameters):
         name, path = parameters.unpack()
         if _unit_name(name):
-            self.revisions[path] = self.revisions.get(path, 0) + 1
-            self.pending_properties.pop(path, None)
-            self.pending_names.pop(path, None)
-            if path in self.states:
-                self._change(path, (name, 'inactive', 'dead'))
-            self._change(path, None)
-
-    def _fetch(self, path, name):
-        # The callback only applies if no newer signal/removal superseded it.
-        revision = self.revisions.get(path, 0)
-        def fetched(value, error):
-            if self.revisions.get(path, 0) != revision:
-                return
-            if error:
-                # Vanishing units during an asynchronous GetAll are normal.
-                remote = self.owner.Gio.DBusError.get_remote_error(error)
-                if remote in ('org.freedesktop.DBus.Error.UnknownObject',
-                              'org.freedesktop.systemd1.NoSuchUnit'):
-                    return
-                self._fail(self._error_code(error, 'service_properties_failed'))
-                return
-            properties = value[0]
-            active, sub = properties.get('ActiveState'), properties.get('SubState')
-            if _state(active) and _state(sub):
-                self.pending_names.pop(path, None)
-                self._change(path, (name, active, sub))
-        self._call(path, PROPERTIES, 'GetAll', self.owner.GLib.Variant('(s)', (UNIT,)),
-                   '(a{sv})', fetched)
+            self._signal('removed', path, None)
 
     def _properties(self, _connection, _sender, path, _interface, _signal, parameters):
         interface, changed, invalidated = parameters.unpack()
         if interface != UNIT:
             return
-        changed = {key: value for key, value in changed.items()
-                   if key in ('ActiveState', 'SubState') and _state(value)}
-        invalidated = [key for key in invalidated if key in ('ActiveState', 'SubState')]
-        if not changed and not invalidated:
-            return
-        self.revisions[path] = self.revisions.get(path, 0) + 1
-        if self.listing:
-            pending, pending_invalidated = self.pending_properties.get(path, ({}, []))
-            pending.update(changed)
-            self.pending_properties[path] = (pending, list(set(pending_invalidated + invalidated)))
-        old = self.states.get(path)
-        if old is None:
-            if path in self.pending_names:
-                self._fetch(path, self.pending_names[path])
-            return
-        if 'ActiveState' in invalidated or 'SubState' in invalidated:
-            self._fetch(path, old[0])
-            return
-        active, sub = changed.get('ActiveState', old[1]), changed.get('SubState', old[2])
-        if _state(active) and _state(sub) and (active, sub) != old[1:]:
-            self._change(path, (old[0], active, sub))
+        changed = {key: value if _state(value) else None for key, value in changed.items()
+                   if key in ('ActiveState', 'SubState')}
+        for key in invalidated:
+            if key in ('ActiveState', 'SubState'):
+                changed[key] = None
+        if changed:
+            self._signal('properties', path, changed)
 
     def _owner_changed(self, _connection, _sender, _path, _interface, _signal, parameters):
         _name, old, new = parameters.unpack()
@@ -293,9 +258,6 @@ class _BusMonitor:
         self.connecting = self.ready = self.listing = False
         self.states.clear()
         self.overlay.clear()
-        self.pending_names.clear()
-        self.pending_properties.clear()
-        self.revisions.clear()
         self.applied_paths.clear()
         self.events.clear()
         self.accounting.reset()
@@ -333,9 +295,10 @@ class _BusMonitor:
             self.was_enabled = True
             # Never replay queued transitions or time gathered while paused.
             if self.ready:
-                self._account(self.states, (now, mono, boot))
-                self._details(self.states.values())
-                self.applied_paths = {p: self.scope + ':' + r[0] for p, r in self.states.items()}
+                complete = self._complete_states()
+                self._account(complete, (now, mono, boot))
+                self._details(complete.values())
+                self.applied_paths = {p: self.scope + ':' + r[0] for p, r in complete.items()}
                 self.last_flush = mono
         if self.connection is None and not self.connecting and mono >= self.retry_at:
             self.connect()
@@ -351,7 +314,7 @@ class _BusMonitor:
                     self._account(payload, clock)
                     self._details(payload.values())
                 else:
-                    path, row = payload
+                    path, row, removed = payload
                     states = self.accounting.states.copy()
                     if row is not None:
                         key = self.scope + ':' + row[0]
@@ -363,6 +326,9 @@ class _BusMonitor:
                         key = self.applied_paths.get(path)
                         if key is not None:
                             states.pop(key, None)
+                            name = key.split(':', 1)[1]
+                            active, sub = ('inactive', 'dead') if removed else ('unknown', 'unknown')
+                            self._details(((name, active, sub),))
                     self.accounting.update(states, *clock)
                 if kind == 'baseline':
                     self.applied_paths = {p: self.scope + ':' + r[0] for p, r in payload.items()}
@@ -373,7 +339,7 @@ class _BusMonitor:
                 self.last_flush = clock[1]
             if mono - self.last_flush >= 5:
                 self.accounting.update(self.accounting.states, now, mono, boot)
-                self._details(self.states.values())
+                self._details(self._complete_states().values())
                 self.last_flush = mono
             if mono - self.last_sync >= RESYNC_SECONDS:
                 self._resync()

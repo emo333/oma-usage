@@ -120,6 +120,12 @@ def _plan():
         _safe(marker)
         if not manifest['venv'] or not marker.is_file() or marker.read_text() != installer.OWNER:
             raise installer.InstallError('Refusing unrelated runtime: ' + str(venv))
+    binary = venv / 'bin/oma-usage-dashboard'
+    _safe(binary)
+    if binary.exists():
+        expected = (manifest.get('dashboard_digest'), manifest.get('dashboard_pending_digest'))
+        if not binary.is_file() or installer._file_digest(binary) not in expected:
+            raise installer.InstallError('Refusing foreign or modified dashboard binary: ' + str(binary))
     config = store.paths()['config'] / 'config.json'
     state = store.paths()['config'] / 'setup-state.json'
     _safe(config)

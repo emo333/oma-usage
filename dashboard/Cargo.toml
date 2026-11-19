@@ -1,0 +1,20 @@
+[package]
+name = "oma-usage-dashboard"
+version = "0.1.0"
+edition = "2024"
+publish = false
+license = "MIT"
+
+[dependencies]
+anyhow = "1"
+async-channel = "2"
+gpui = "=0.2.2"
+# GPUI's zed-async-tar uses xattr 0.2, which still needs libc's Linux ENOATTR alias.
+libc = "=0.2.177"
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = "1"
+
+[profile.dev]
+debug = 0
+strip = "debuginfo"
+incremental = false
